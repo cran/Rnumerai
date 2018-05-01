@@ -1,6 +1,6 @@
 Package: Rnumerai
 Title: Interface to the Numerai Machine Learning Tournament API
-Version: 0.2
+Version: 0.3
 Authors@R: c(
     person("Omni Analytics Group", email = "services@omnianalytics.io", role = "aut"),
     person("Eric Hare", email = "eric@omnianalytics.io", role = "cre"))
@@ -17,9 +17,9 @@ BugReports: https://github.com/Omni-Analytics-Group/Rnumerai/issues
 RoxygenNote: 6.0.1
 Imports: httr, lubridate
 NeedsCompilation: no
-Packaged: 2018-01-04 20:44:59 UTC; erichare
+Packaged: 2018-05-01 16:09:16 UTC; erichare
 Author: Omni Analytics Group [aut],
   Eric Hare [cre]
 Maintainer: Eric Hare <eric@omnianalytics.io>
 Repository: CRAN
-Date/Publication: 2018-01-04 21:08:07 UTC
+Date/Publication: 2018-05-01 16:24:36 UTC

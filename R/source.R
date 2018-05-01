@@ -207,7 +207,7 @@ run_query <- function(query, id = get_public_id(), key = get_api_key())
 download_data <- function(location = tempdir())
 {
 	## Get download link
-	download_link_query <- '{dataset}'
+	download_link_query <- '{dataset(tournament:1)}'
 	query_pass <- run_query(query=download_link_query)
 	download_link <- query_pass$data$dataset
 
@@ -234,6 +234,7 @@ download_data <- function(location = tempdir())
 #' @param location The location in which to store the predictions
 #' @return The submission id for the submission made
 #' @export
+#' @import lubridate
 #' @import httr
 #' @importFrom utils write.csv
 #' @examples
@@ -248,7 +249,7 @@ submit_predictions <- function(submission, location = tempdir())
 
 	## Get a slot on AWS for our submission
 	aws_slot_query <- 'query aws_slot_query {
-							submissionUploadAuth (filename : "submission_data.csv"){
+							submissionUploadAuth (filename : "submission_data.csv",tournament:1){
 								filename,
 								url
 							}
@@ -264,7 +265,7 @@ submit_predictions <- function(submission, location = tempdir())
 	## Register our submission and get evaluation for it
 	register_submission_query <- paste0(
 											'mutation register_submission_query {
-												createSubmission (filename : "',query_pass$data$submissionUploadAuth$filename,'"){id}
+												createSubmission (filename : "',query_pass$data$submissionUploadAuth$filename,'",tournament:1){id}
 											}'
 										)
 	query_pass <- run_query(query=register_submission_query)
@@ -373,7 +374,6 @@ user_info <- function()
 									from
 									to
 									value
-									id
 									posted
 									source
 									status
@@ -383,7 +383,6 @@ user_info <- function()
 									from
 									to
 									value
-									id
 									posted
 									source
 									status
@@ -441,29 +440,29 @@ user_info <- function()
 	clean_nmr_deposits <- function(x)
 	{
 		if(length(x)==0) return(NULL)
-		return(as.data.frame(do.call(rbind,x))[,c("from","to","value","status","id","posted","source","txHash")])
+		return(as.data.frame(do.call(rbind,x))[,c("from","to","value","status","posted","source","txHash"),drop=FALSE])
 	}
 	clean_nmr_withdrawls <- function(x)
 	{
 		if(length(x)==0) return(NULL)
-		return(as.data.frame(do.call(rbind,x))[,c("from","to","value","status","id","posted","source","txHash")])
+		return(as.data.frame(do.call(rbind,x))[,c("from","to","value","status","posted","source","txHash"),drop=FALSE])
 	}
 	clean_usd_withdrawls <- function(x)
 	{
 		if(length(x)==0) return(NULL)
-		return(as.data.frame(do.call(rbind,x))[,c("from","to","ethAmount","usdAmount","sendTime","confirmTime","status","id","posted","txHash","userId")])
+		return(as.data.frame(do.call(rbind,x))[,c("from","to","ethAmount","usdAmount","sendTime","confirmTime","status","id","posted","txHash","userId"),drop=FALSE])
 	}
 	clean_payments_data <- function(x)
 	{
 		if(length(x)==0) return(NULL)
-		payment_data <- as.data.frame(do.call(rbind,lapply(x,unlist))[,c("round.number","nmrAmount","usdAmount","tournament","submission.id","submission.filename")])
+		payment_data <- as.data.frame(do.call(rbind,lapply(x,unlist))[,c("round.number","nmrAmount","usdAmount","tournament","submission.id","submission.filename"),drop=FALSE])
 		names(payment_data) <- c("Round_Number","NMR","USD","Tournament","Submission_ID","Submission_Filename")
 		return(payment_data)
 	}
 	clean_stake_transactions <- function(x)
 	{
 		if(length(x)==0) return(NULL)
-		return(as.data.frame(do.call(rbind,x))[,c("roundNumber","value","soc","confidence","status","insertedAt","staker","txHash")])
+		return(as.data.frame(do.call(rbind,x))[,c("roundNumber","value","soc","confidence","status","insertedAt","staker","txHash"),drop=FALSE])
 	}
 
 	result <- list(
@@ -500,7 +499,7 @@ user_info <- function()
 current_round <- function()
 {
 	current_round = 'query current_round {
-						rounds(number:0) {
+						rounds(number:0,tournament:1) {
 							number
 							closeTime
 							closeStakingTime
@@ -531,6 +530,7 @@ stake_nmr <- function(value, confidence, mfa_code = "", password = "")
 								password:"',password,'"
 								value:"',value,'"
 								confidence:"',confidence,'"
+								tournament :1 
 								round:',as.numeric(current_round()["Round_Number"]),'
 								){
 									txHash
@@ -556,7 +556,7 @@ round_stats <- function(round_number)
 {
 	round_stats_query <- paste0(
 									'query round_stats_query {
-									rounds(number:',round_number,'){
+									rounds(number:',round_number,',tournament:1){
 										number
 										openTime
 										resolvedGeneral
@@ -565,6 +565,7 @@ round_stats <- function(round_number)
 										closeStakingTime
 										leaderboard {
 											username
+											banned
 											validationLogloss
 											consistency
 											liveLogloss
@@ -572,6 +573,10 @@ round_stats <- function(round_number)
 												nmrAmount
 												usdAmount
       										}
+      										paymentStaking {
+												usdAmount
+												nmrAmount
+											}
 											stake {
 												confidence
 												value
@@ -597,16 +602,20 @@ round_stats <- function(round_number)
 	round_lb <- query_pass$data$rounds[[1]]$leaderboard
 	result_leaderboard <- data.frame(
 										Username = sapply(round_lb,function(x) x$username),
+										Banned = sapply(round_lb,function(x) x$banned),
 										Live_Logloss = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$liveLogloss),0,x$liveLogloss))),
-										Validation_Logloss = sapply(round_lb,function(x) x$validationLogloss),
-										Consistency = sapply(round_lb,function(x) x$consistency),
+										Validation_Logloss = sapply(round_lb,function(x) ifelse(is.null(x$validationLogloss),NA,x$validationLogloss)),
+										Consistency = sapply(round_lb,function(x) ifelse(is.null(x$consistency),NA,x$consistency)),
 										Paid_USD = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentGeneral$usdAmount),0,x$paymentGeneral$usdAmount))),
 										Paid_NMR = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentGeneral$nmrAmount),0,x$paymentGeneral$nmrAmount))),
 										Stake_Amount = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$stake$value),0,x$stake$value))),
 										Stake_Confidence = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$stake$confidence),NA,x$stake$confidence))),
 										Stake_Success = sapply(round_lb,function(x) ifelse(is.null(x$stakeResolution$successful),NA,x$stakeResolution$successful)),
 										Stake_Destroyed = sapply(round_lb,function(x) ifelse(is.null(x$stakeResolution$destroyed),NA,x$stakeResolution$destroyed)),
-										Stake_Paid = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$stakeResolution$paid),0,x$stakeResolution$paid)))
+										Stake_Paid = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentStaking$usdAmount),0,x$paymentStaking$usdAmount))),
+										Stake_Paid_NMR = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentStaking$nmrAmount),0,x$paymentStaking$nmrAmount))),
+										Paid_USD_Total = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentGeneral$usdAmount),0,x$paymentGeneral$usdAmount)))+as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentStaking$usdAmount),0,x$paymentStaking$usdAmount))),
+										Paid_NMR_Total = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentGeneral$nmrAmount),0,x$paymentGeneral$nmrAmount)))+as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentStaking$nmrAmount),0,x$paymentStaking$nmrAmount)))
 									)
 	return(list(round_info = result_info , round_leaderboard = result_leaderboard))
 }
