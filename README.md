@@ -44,7 +44,7 @@ Get your public key and api key by going to numer.ai and then going to `Custom A
 
 Optional: If we choose not to setup the credentials here the terminal will interactively prompt us to type the values when we make an API call.
 
-### 4. Download data set for the current tournament and split it into training data and tournament data 
+### 4. Download data set for the current round and split it into training data and tournament data 
 
 -    `data <- download_data(data_dir)`
 -    `data_train <- data$data_train`
@@ -54,21 +54,52 @@ Optional: If we choose not to setup the credentials here the terminal will inter
 
 A user can put his/her own custom model code to generate the predictions here. For demonstration purposes, we will generate random predictions.
 
--   `submission <- data.frame(id=data_tournament$id,probability = sample(seq(.35,.65,by=.1),nrow(data_tournament),replace=TRUE))`
+-   `submission <- data.frame(id=data_tournament$id,prediction_kazutsugi = sample(seq(.35,.65,by=.1),nrow(data_tournament),replace=TRUE))`
 
-### 6. Submit predictions and get submission id
+### 6. Submit predictions for tournament and get submission id
 
--    `submission_id <- submit_predictions(submission, data_dir)`
+The submission object should have two columns (id & prediction_kazutsugi) only.
+
+-    `submission_id <- submit_predictions(submission,data_dir,tournament="Kazutsugi")`
 
 ### 7. Check the status of the submission (Wait for a few seconds to get the submission evaluated)
 
 -   `Sys.sleep(10)      ## 10 Seconds wait period`
 -   `status_submission_by_id(submission_id)`
     
-### 8. Stake submission on submission made above and get transaction hash for it.
+### 8. Stake submission on submission and get transaction hash for it.
 
--   `stake_tx_hash <- stake_nmr(value = 1, confidence = ".5")`
+-   `stake_tx_hash <- stake_nmr(value = 1)`
 -   `stake_tx_hash`
+
+### 9. Release Stake and get transaction hash for it.
+
+-   `release_tx_hash <- release_nmr(value = 1)`
+-   `release_tx_hash`
+
+# Performance functions
+
+Users can now check performance across the following metrics: `Reputation`, `Rank`, `NMR_Staked`, `Leaderboard_Bonus`, `Payout_NMR`, `Average_Daily_Correlation`, `Round_Correlation`, `MMC`, `Correlation_With_MM`.
+
+### 1. Display performance distributions
+
+Create histograms of metric performance
+
+- `performance_distribution(c("objectscience"), "Average_Daily_Correlation")`
+- `performance_distribution(c("objectscience"), "MMC")`
+
+### 2. Display performance over time
+
+Create time series plots of metric performance
+
+- `performance_over_time(c("objectscience"), "MMC")`
+- `performance_over_time(c("objectscience", "uuazed", "arbitrage"), "Average_Daily_Correlation", outlier_cutoff = .01, merge = TRUE)`
+
+### 3. Display performance summary statistics
+
+Create a table of summary statistics
+
+- `summary_statistics(c("objectscience", "uuazed", "arbitrage"))`
 
 # Additional functions
 
@@ -79,24 +110,31 @@ Get user information for the user whose API key and ID are entered, Check out th
 -   `uinfo <- user_info()`
 -   `uinfo`
 -   `names(uinfo)`
--   `uinfo$Latest_Submission`
 
-### 2. Get leaderboard for a round
-Get leaderboard information for a given round number (Round 51 & Above).
+### 2. Get Information for a round
+Get information for a given round number.
 
--   `round_info <- round_stats(round_number=79)`
--   `round_info$round_info`
--   `round_info$round_leaderboard`
+-   `round_stats(tournament="Kazutsugi",round_number=177)`
 
 ### 3. Get current open round
 Get closing time and round number for current open round
 
 -   `current_round()`
 
-### 4. Run Custom GraphQL code from R:
+### 4. Get current leaderboard
+Get V2 Leaderboard
+
+-   `leaderboard()`
+
+### 5. Get User Performance
+Get V2 User Profile 
+
+-   `user_performance(user_name="theomniacs")`
+
+### 6. Run Custom GraphQL code from R:
 
 -   `custom_query <- 'query queryname {
-    					rounds (number:82) {
+    					rounds (number:177) {
     						closeTime
     					}
     				}'`

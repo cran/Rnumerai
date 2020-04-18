@@ -187,9 +187,10 @@ run_query <- function(query, id = get_public_id(), key = get_api_key())
 #'
 #' @name download_data
 #' @param location The directory path in which to store the data
+#' @param tournament The name of the tournament, Default is KAZUTSUGI and is not case-sensitive. Since at the moment the datasets are same for all tournaments this parameter can be left blank.
 #' @return A list containing the training and tournament data objects
 #' @export
-#' @import lubridate
+#' @importFrom lubridate today
 #' @import httr
 #' @importFrom utils unzip
 #' @importFrom utils read.csv
@@ -200,14 +201,18 @@ run_query <- function(query, id = get_public_id(), key = get_api_key())
 #' data_dir <- tempdir()
 #'
 #' ## Download data set for current competition
-#' data <- download_data(data_dir)
+#' data <- download_data(data_dir,tournament="KAZUTSUGI")
 #' data_train <- data$data_train
 #' data_tournament <- data$data_tournament
 #' }
-download_data <- function(location = tempdir())
+download_data <- function(location = tempdir(),tournament="KAZUTSUGI")
 {
+	## Match tournament ID
+	tournament_id <- match(tolower(tournament),tolower(c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","KAZUTSUGI")))
+	if(is.na(tournament_id)) stop("Tournament Name doesn't match")
+
 	## Get download link
-	download_link_query <- '{dataset(tournament:1)}'
+	download_link_query <- paste0('{dataset(tournament:',tournament_id,')}')
 	query_pass <- run_query(query=download_link_query)
 	download_link <- query_pass$data$dataset
 
@@ -230,30 +235,38 @@ download_data <- function(location = tempdir())
 #' Function to submit the Numerai Tournament predictions
 #'
 #' @name submit_predictions
-#' @param submission The data frame of predictions to submit. This should have two columns named "id" & "probability"
+#' @param submission The data frame of predictions to submit. This should have two columns named "id" & "prediction_kazutsugi"
+#' @param model_id Target model UUID (required for accounts with multiple models)
 #' @param location The location in which to store the predictions
+#' @param tournament The name of the tournament, Default is Kazutsugi and is not case-sensitive
 #' @return The submission id for the submission made
 #' @export
-#' @import lubridate
+#' @importFrom lubridate today
 #' @import httr
 #' @importFrom utils write.csv
 #' @examples
 #' \dontrun{
-#' submission_id <- submit_predictions(submission_data)
+#' submission_id <- submit_predictions(submission_data,tournament="Kazutsugi")
 #' }
-submit_predictions <- function(submission, location = tempdir())
+submit_predictions <- function(submission, model_id = NULL, location = tempdir(),tournament="Kazutsugi")
 {
+	## Match tournament ID
+	tournament_id <- match(tolower(tournament),tolower(c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","KAZUTSUGI")))
+	if(is.na(tournament_id)) stop("Tournament Name doesn't match")
+	if(!all(names(submission)==c("id","prediction_kazutsugi"))) stop("Column names should be id & prediction_kazutsugi")
+	#names(submission)[2] <- paste0(names(submission)[2],"_",tolower(tournament))
+
 	## Write out the file
 	submission_filename <- file.path(location, paste0("submission_data_", today(), ".csv"))
 	write.csv(submission, submission_filename, row.names = FALSE)
 
 	## Get a slot on AWS for our submission
-	aws_slot_query <- 'query aws_slot_query {
-							submissionUploadAuth (filename : "submission_data.csv",tournament:1){
+	aws_slot_query <- paste0('query aws_slot_query {
+							submissionUploadAuth (filename : "submission_data.csv",tournament:',tournament_id,'){
 								filename,
 								url
 							}
-						}'
+						}')
 	query_pass <- run_query(query=aws_slot_query)
 
 	## Upload the predictions
@@ -265,16 +278,19 @@ submit_predictions <- function(submission, location = tempdir())
 	## Register our submission and get evaluation for it
 	register_submission_query <- paste0(
 											'mutation register_submission_query {
-												createSubmission (filename : "',query_pass$data$submissionUploadAuth$filename,'",tournament:1){id}
+												createSubmission (filename : "',query_pass$data$submissionUploadAuth$filename,'",tournament:',tournament_id,'",modelId:',model_id,'){id}
 											}'
 										)
 	query_pass <- run_query(query=register_submission_query)
 
-	message(paste("Submitted Prediction with id",query_pass$data$createSubmission$id))
+	## If error
+	if(!is.null(query_pass$errors[[1]]$message)) stop(query_pass$errors[[1]]$message)
 
 	## Return submission id
+	message(paste("Submitted Prediction with id",query_pass$data$createSubmission$id))
 	return(query_pass$data$createSubmission$id)
 }
+
 
 #' Get information about a submission from a submission id
 #'
@@ -292,17 +308,13 @@ status_submission_by_id <- function(sub_id)
 								'query sub_stat_query {
 									submissions (id : "',sub_id,'"){
 										filename,
-										liveLogloss,
+										validationCorrelation,
+										liveCorrelation,
 										round{
 											number
 										},
 										selected,
-										validationLogloss,
 										consistency,
-										originality {
-											pending
-											value
-										},
 										concordance {
 											pending
 											value
@@ -313,9 +325,9 @@ status_submission_by_id <- function(sub_id)
 	query_pass <- run_query(query=sub_stat_query)
 
 	## If not evaluated yet
-	if(is.null(query_pass$data$submissions[[1]]$validationLogloss))
+	if(is.null(query_pass$data$submissions[[1]]$concordance))
 	{
-		return(NULL)
+		return("Not Scored Yet")
 	}
 
 	## If evaluated submission
@@ -324,11 +336,10 @@ status_submission_by_id <- function(sub_id)
 					Round_Number = query_pass$data$submissions[[1]]$round$number,
 					Filename = query_pass$data$submissions[[1]]$filename,
 					Selected = query_pass$data$submissions[[1]]$selected,
-					Validation_Logloss = query_pass$data$submissions[[1]]$validationLogloss,
-					Originality = ifelse(!query_pass$data$submissions[[1]]$originality$pending,query_pass$data$submissions[[1]]$originality$value,"Pending"),
 					Consistency = query_pass$data$submissions[[1]]$consistency,
 					Concordance = ifelse(!query_pass$data$submissions[[1]]$concordance$pending,query_pass$data$submissions[[1]]$concordance$value,"Pending"),
-					Live_Logloss = query_pass$data$submissions[[1]]$liveLogloss
+					Validation_Correlation = query_pass$data$submissions[[1]]$validationCorrelation,
+					Live_Correlation = query_pass$data$submissions[[1]]$liveCorrelation
 					)
 	return(result)
 }
@@ -336,6 +347,7 @@ status_submission_by_id <- function(sub_id)
 #' Get information about your username
 #'
 #' @name user_info
+#' @param model_id The id of the model
 #' @return A list containing information about user
 #' @export
 #' @examples
@@ -344,126 +356,26 @@ status_submission_by_id <- function(sub_id)
 #' names(uinfo)
 #' uinfo$Latest_Submission
 #' }
-user_info <- function()
+user_info <- function(model_id = NULL)
 {
-	user_info_query <-	'query user_info_query {
-							user {
-								apiTokens {
-									name
-									publicId
-									scopes
-								}
-								assignedEthAddress
-								banned
-								customEthAddresses
+    .Deprecated("account_info")
+	user_info_query <-	paste0('query user_info_query {
+							user(modelId: "', model_id, '") {
 								id
-								email
 								username
+								email
 								insertedAt
 								status
+								banned
 								mfaEnabled
-								latestSubmission {
-									id
-									round {
-										number
-									}
-								}
-								availableUsd
 								availableNmr
-								nmrDeposits {
-									from
-									to
-									value
-									posted
-									source
-									status
-									txHash
-								}
-								nmrWithdrawals {
-									from
-									to
-									value
-									posted
-									source
-									status
-									txHash
-								}
-								payments {
-									round {
-										number
-									}
-									nmrAmount
-									usdAmount
-									submission {
-										id
-										filename
-									}
-									tournament
-								}
-								usdWithdrawals {
-									from
-									to
-									ethAmount
-									usdAmount
-									sendTime
-									confirmTime
-									status
-									id
-									posted
-									userId
-									txHash
-								}
-								stakeTxs{
-									roundNumber
-									value
-									confidence
-									status
-									insertedAt
-									soc
-									staker
-									txHash
-								}
+								availableEth
+								availableUsd
+								assignedEthAddress
 							}
-						}'
+						}')
 
 	query_pass <- run_query(query=user_info_query)
-
-	## Cleaning functions to report result
-	clean_tokens_info <- function(x)
-	{
-		data.frame(
-						Name = x$name,
-						Public_ID = x$publicId,
-						Scopes = paste(unlist(x$scopes),collapse=", ")
-					)
-	}
-	clean_nmr_deposits <- function(x)
-	{
-		if(length(x)==0) return(NULL)
-		return(as.data.frame(do.call(rbind,x))[,c("from","to","value","status","posted","source","txHash"),drop=FALSE])
-	}
-	clean_nmr_withdrawls <- function(x)
-	{
-		if(length(x)==0) return(NULL)
-		return(as.data.frame(do.call(rbind,x))[,c("from","to","value","status","posted","source","txHash"),drop=FALSE])
-	}
-	clean_usd_withdrawls <- function(x)
-	{
-		if(length(x)==0) return(NULL)
-		return(as.data.frame(do.call(rbind,x))[,c("from","to","ethAmount","usdAmount","sendTime","confirmTime","status","id","posted","txHash","userId"),drop=FALSE])
-	}
-	clean_payments_data <- function(x)
-	{
-		if(length(x)==0) return(NULL)
-		payment_data <- as.data.frame(do.call(rbind,lapply(x,unlist))[,c("round.number","nmrAmount","usdAmount","tournament","submission.id","submission.filename"),drop=FALSE])
-		names(payment_data) <- c("Round_Number","NMR","USD","Tournament","Submission_ID","Submission_Filename")
-		return(payment_data)
-	}
-	clean_stake_transactions <- function(x)
-	{
-		if(length(x)==0) return(NULL)
-		return(as.data.frame(do.call(rbind,x))[,c("roundNumber","value","soc","confidence","status","insertedAt","staker","txHash"),drop=FALSE])
-	}
 
 	result <- list(
 						Email_Address = query_pass$data$user$email,
@@ -473,65 +385,138 @@ user_info <- function()
 						Current_Status = query_pass$data$user$status,
 						MFA_Enabled = query_pass$data$user$mfaEnabled,
 						Banned = query_pass$data$user$banned,
-						Api_Tokens = do.call(rbind,lapply(query_pass$data$user$apiTokens,clean_tokens_info)),
 						Assigned_ETH_Address = query_pass$data$user$assignedEthAddress,
 						Custom_ETH_Address = unlist(query_pass$data$user$customEthAddresses),
-						Latest_Submission = data.frame(Round_Number = unlist(query_pass$data$user$latestSubmission)[1], Submission_ID = unlist(query_pass$data$user$latestSubmission)[2]),
-						Balances = data.frame(USD=query_pass$data$user$availableUsd,NMR = query_pass$data$user$availableNmr),
-						NMR_Deposits = clean_nmr_deposits(query_pass$data$user$nmrDeposits),
-						NMR_Withdrawls = clean_nmr_withdrawls(query_pass$data$user$nmrWithdrawals),
-						Payments = clean_payments_data(query_pass$data$user$payments),
-						USD_Withdrawls = clean_usd_withdrawls(query_pass$data$user$usdWithdrawals),
-						Stakes_Transactions = clean_stake_transactions(query_pass$data$user$stakeTxs)
+						Balances = data.frame(USD=query_pass$data$user$availableUsd,NMR = query_pass$data$user$availableNmr)
 					)
 	return(result)
+}
+
+#' Get models associated with your account
+#'
+#' @name get_models
+#' @return A list containing information about the models
+#' @export
+#' @examples
+#' \dontrun{
+#' models <- get_models()
+#' }
+get_models <- function() {
+    models_query = 'query {
+            account {
+              models {
+                id
+                name
+              }
+            }
+          }'
+
+    query_pass <- run_query(query=models_query)
+
+    model_list <- query_pass$data$account$models
+    model_ids <- sapply(model_list, `[[`, 1)
+    names(model_ids) <- sapply(model_list, `[[`, 2)
+
+
+    return(model_ids)
+}
+
+#' Get information about your account
+#'
+#' @name account_info
+#' @return A list containing information about account
+#' @export
+#' @examples
+#' \dontrun{
+#' ainfo <- account_info()
+#' names(ainfo)
+#' ainfo$Latest_Submission
+#' }
+account_info <- function()
+{
+    account_info_query <-	'query {
+                            account {
+                              username
+                              walletAddress
+                              availableNmr
+                              email
+                              id
+                              mfaEnabled
+                              status
+                              insertedAt
+                              models {
+                                id
+                                name
+                                submissions {
+                                  id
+                                  filename
+                                }
+                                v2Stake {
+                                  status
+                                  txHash
+                                }
+                              }
+                              apiTokens {
+                                name
+                                public_id
+                                scopes
+                              }
+            }
+          }'
+
+    query_pass <- run_query(query=account_info_query)
+
+    return(query_pass$data$account)
 }
 
 #' Get current round and it's closing time
 #'
 #' @name current_round
+#' @param tournament The name of the tournament, Default is Kazutsugi and is not case-sensitive
 #' @return Returns the current round number and it's closing times
 #' @export
 #' @examples
 #' \dontrun{
 #' current_round()
 #' }
-current_round <- function()
+current_round <- function(tournament="Kazutsugi")
 {
-	current_round = 'query current_round {
-						rounds(number:0,tournament:1) {
+	## Match tournament ID
+	tournament_id <- match(tolower(tournament),tolower(c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","KAZUTSUGI")))
+	if(is.na(tournament_id)) stop("Tournament Name doesn't match")
+
+	current_round = paste0('query current_round {
+						rounds(number:0,tournament:',tournament_id,') {
 							number
 							closeTime
 							closeStakingTime
 						}
-					}'
+					}')
 	query_pass <- run_query(query=current_round)
 	return(c(Round_Number=query_pass$data$rounds[[1]]$number,Close_Time=query_pass$data$rounds[[1]]$closeTime,Close_Staking_Time=query_pass$data$rounds[[1]]$closeStakingTime))
 }
 
-#' Stake NMR on the current round
+#' Stake NMR
 #'
 #' @name stake_nmr
 #' @param value The amount of NMR to stake
-#' @param confidence The confidence value to use
+#' @param model_id The id of the model with which to stake
 #' @param mfa_code The mfa code
 #' @param password Your password
 #' @return The transaction hash for stake made
 #' @export
 #' @examples
 #' \dontrun{
-#' stake_tx_hash <- stake_nmr(value = 1, confidence = ".5")
+#' stake_tx_hash <- stake_nmr(value = 1)
 #' }
-stake_nmr <- function(value, confidence, mfa_code = "", password = "")
+stake_nmr <- function(value, model_id = NULL, mfa_code = "", password = "")
 {
 	stake_query <- paste0(
 							'mutation stake_query {
-								stake(code:"',mfa_code,'"
+								v2Stake(code:"',mfa_code,'"
 								password:"',password,'"
 								value:"',value,'"
-								confidence:"',confidence,'"
-								tournament :1 
-								round:',as.numeric(current_round()["Round_Number"]),'
+								modelId:"',model_id,'"
 								){
 									txHash
 								}}'
@@ -540,53 +525,63 @@ stake_nmr <- function(value, confidence, mfa_code = "", password = "")
 	return(query_pass)
 }
 
-#' Get Information and leader board for a Round Number
+#' Release NMR
 #'
-#' @name round_stats
-#' @param round_number Round Number for which information to fetch
-#' @return List containing general round information and leaderboard
+#' @name release_nmr
+#' @param value The amount of NMR to release
+#' @param model_id The id of the model with which to stake
+#' @param mfa_code The mfa code
+#' @param password Your password
+#' @return The transaction hash for release request
 #' @export
 #' @examples
 #' \dontrun{
-#' round_info <- round_stats(round_number=79)
-#' round_info$round_info
-#' round_info$round_leaderboard
+#' release_tx_hash <- release_nmr(value = 1)
 #' }
-round_stats <- function(round_number)
+release_nmr <- function(value, model_id = NULL, mfa_code = "", password = "")
 {
+	release_query <- paste0(
+							'mutation release_query {
+								v2ReleaseStakeRequest(code:"',mfa_code,'"
+								password:"',password,'"
+								value:"',value,'"
+								modelId:"',model_id,'"
+								){
+									txHash
+								}}'
+							)
+	query_pass <- run_query(query=release_query)
+	return(query_pass)
+}
+
+
+#' Get Information for a Round Number
+#'
+#' @name round_stats
+#' @param round_number Round Number for which information to fetch
+#' @param tournament The name of the tournament, Default is Kazutsugi and is not case-sensitive
+#' @return List containing general round information
+#' @export
+#' @examples
+#' \dontrun{
+#' round_stats(round_number=177)
+#' }
+round_stats <- function(round_number,tournament="Kazutsugi")
+{
+	## Match tournament ID
+	tournament_id <- match(tolower(tournament),tolower(c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","KAZUTSUGI")))
+	if(is.na(tournament_id)) stop("Tournament Name doesn't match")
+
 	round_stats_query <- paste0(
 									'query round_stats_query {
-									rounds(number:',round_number,',tournament:1){
+									rounds(number:',round_number,',tournament:',tournament_id,'){
 										number
+										tournament
 										openTime
 										resolvedGeneral
 										resolvedStaking
 										closeTime
 										closeStakingTime
-										leaderboard {
-											username
-											banned
-											validationLogloss
-											consistency
-											liveLogloss
-											paymentGeneral {
-												nmrAmount
-												usdAmount
-      										}
-      										paymentStaking {
-												usdAmount
-												nmrAmount
-											}
-											stake {
-												confidence
-												value
-											}
-											stakeResolution {
-												successful
-												destroyed
-												paid
-											}
-										}
 									}}'
 								)
 	query_pass <- run_query(query=round_stats_query)
@@ -594,34 +589,388 @@ round_stats <- function(round_number)
 	round_data <- query_pass$data$rounds[[1]]
 	result_info <- data.frame(
 								Round_Number = round_data$number,
+								Tournament_Name = c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","KAZUTSUGI")[round_data$tournament],
 								Open_Time = round_data$openTime,
 								Close_Time = round_data$closeTime,
 								Close_Staking_Time = ifelse(is.null(round_data$closeStakingTime),NA,round_data$closeStakingTime),
 								If_Resolved = round_data$resolvedGeneral
   							)
-	round_lb <- query_pass$data$rounds[[1]]$leaderboard
-	result_leaderboard <- data.frame(
-										Username = sapply(round_lb,function(x) x$username),
-										Banned = sapply(round_lb,function(x) x$banned),
-										Live_Logloss = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$liveLogloss),0,x$liveLogloss))),
-										Validation_Logloss = sapply(round_lb,function(x) ifelse(is.null(x$validationLogloss),NA,x$validationLogloss)),
-										Consistency = sapply(round_lb,function(x) ifelse(is.null(x$consistency),NA,x$consistency)),
-										Paid_USD = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentGeneral$usdAmount),0,x$paymentGeneral$usdAmount))),
-										Paid_NMR = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentGeneral$nmrAmount),0,x$paymentGeneral$nmrAmount))),
-										Stake_Amount = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$stake$value),0,x$stake$value))),
-										Stake_Confidence = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$stake$confidence),NA,x$stake$confidence))),
-										Stake_Success = sapply(round_lb,function(x) ifelse(is.null(x$stakeResolution$successful),NA,x$stakeResolution$successful)),
-										Stake_Destroyed = sapply(round_lb,function(x) ifelse(is.null(x$stakeResolution$destroyed),NA,x$stakeResolution$destroyed)),
-										Stake_Paid = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentStaking$usdAmount),0,x$paymentStaking$usdAmount))),
-										Stake_Paid_NMR = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentStaking$nmrAmount),0,x$paymentStaking$nmrAmount))),
-										Paid_USD_Total = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentGeneral$usdAmount),0,x$paymentGeneral$usdAmount)))+as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentStaking$usdAmount),0,x$paymentStaking$usdAmount))),
-										Paid_NMR_Total = as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentGeneral$nmrAmount),0,x$paymentGeneral$nmrAmount)))+as.numeric(sapply(round_lb,function(x) ifelse(is.null(x$paymentStaking$nmrAmount),0,x$paymentStaking$nmrAmount)))
-									)
-	return(list(round_info = result_info , round_leaderboard = result_leaderboard))
+
+	return(result_info)
 }
 
+#' Get Current leaderboard
+#'
+#' @name leaderboard
+#' @return List containing leaderboard
+#' @export
+#' @examples
+#' \dontrun{
+#' leaderboard()
+#' }
+leaderboard <- function()
+{
+	leaderboard_query <- paste0(
+									'query leaderboard_query {
+									v2Leaderboard{
+										bonusPerc
+										nmrStaked
+										prevRank
+										rank
+										reputation
+										tier
+										username
+										stakedRank
+									}}'
+								)
+	query_pass <- run_query(query=leaderboard_query)
 
+	result_info <- data.frame(
+								Username = sapply(query_pass$data$v2Leaderboard,"[[","username"),
+								Tier = sapply(query_pass$data$v2Leaderboard,"[[","tier"),
+								Staked_Rank = sapply(query_pass$data$v2Leaderboard,function(x) ifelse(is.null(x[["stakedRank"]]),NA,x[["stakedRank"]])),
+								Reputation = sapply(query_pass$data$v2Leaderboard,"[[","reputation"),
+								Rank = sapply(query_pass$data$v2Leaderboard,"[[","rank"),
+								Previous_Rank = sapply(query_pass$data$v2Leaderboard,function(x) ifelse(is.null(x[["prevRank"]]),NA,x[["prevRank"]])),
+								NMR_Staked = sapply(query_pass$data$v2Leaderboard,"[[","nmrStaked"),
+								Bonus_Percentage = sapply(query_pass$data$v2Leaderboard,"[[","bonusPerc")
+  							)
 
+	return(result_info)
+}
 
+#' Get User Performance
+#'
+#' @name user_performance
+#' @param user_name UserName for which performance metrics to get
+#' @return Get User Performance
+#' @export
+#' @examples
+#' \dontrun{
+#' user_performance(user_name="theomniacs")
+#' }
+user_performance <- function(user_name="theomniacs")
+{
+	user_query <- paste0(
+									'query user_query {
+									v2UserProfile(username:"',tolower(user_name),'"){
+										dailyUserPerformances {
+											averageCorrelation
+      										averageCorrelationPayout
+      										date
+      										leaderboardBonus
+      										rank
+      										reputation
+      										stakeValue
+      										tier
+										}
+										dailySubmissionPerformances {
+											correlation
+      										date
+      										roundNumber
+      										mmc
+      										correlationWithMetamodel
+      									}
+      									historicalNetNmrEarnings
+      									historicalNetUsdEarnings
+      									netEarnings
+      									totalStake
+									}}'
+								)
+	query_pass <- run_query(query=user_query)
 
+	user_performance <- data.frame(
+								Date = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,"[[","date"),
+								Tier = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,"[[","tier"),
+								Reputation = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,"[[","reputation"),
+								Rank = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,"[[","rank"),
+								NMR_Staked = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,function(x) ifelse(is.null(x[["stakeValue"]]),NA,x[["stakeValue"]])),
+								Leaderboard_Bonus = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,function(x) ifelse(is.null(x[["leaderboardBonus"]]),NA,x[["leaderboardBonus"]])),
+								Payout_NMR = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,function(x) ifelse(is.null(x[["averageCorrelationPayout"]]),NA,x[["averageCorrelationPayout"]])),
+								Average_Daily_Correlation = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,function(x) ifelse(is.null(x[["averageCorrelation"]]),NA,x[["averageCorrelation"]]))
+  							)
+	submission_performance <- data.frame(
+								Round_Number = sapply(query_pass$data$v2UserProfile$dailySubmissionPerformances,"[[","roundNumber"),
+								Date = sapply(query_pass$data$v2UserProfile$dailySubmissionPerformances,"[[","date"),
+								Round_Correlation = sapply(query_pass$data$v2UserProfile$dailySubmissionPerformances,function(x) ifelse(is.null(x[["correlation"]]),NA,x[["correlation"]])),
+								MMC = sapply(query_pass$data$v2UserProfile$dailySubmissionPerformances,function(x) ifelse(is.null(x[["mmc"]]),NA,x[["mmc"]])),
+								Correlation_With_MM = sapply(query_pass$data$v2UserProfile$dailySubmissionPerformances,function(x) ifelse(is.null(x[["correlationWithMetamodel"]]),NA,x[["correlationWithMetamodel"]]))
+  							)
 
+	return(list(User_Performance = user_performance,
+					Submission_Performance=submission_performance,
+					Net_Earnings = query_pass$data$v2UserProfile$netEarnings,
+					Historical_Net_Earnings_USD = query_pass$data$v2UserProfile$historicalNetUsdEarnings,
+					Historical_Net_Earnings_NMR = query_pass$data$v2UserProfile$historicalNetNmrEarnings
+				))
+
+}
+
+#' Get the performance of the user over time
+#'
+#' @name user_performance_data
+#'
+#' @param username A vector of one or more usernames
+#' @param dates A vector of one or more dates to consider. If NULL, use all data
+#' @param round_aggregate If TRUE, aggregate the submission data by round
+#'
+#' @export
+#'
+#' @import dplyr
+#' @importFrom lubridate ymd_hms
+#'
+user_performance_data <- function(username, dates = NULL, round_aggregate = TRUE) {
+    Reputation <- Average_Daily_Correlation <- Date <- MMC <- NULL
+    Round_Correlation <- Correlation_With_MM <- Round_Number <- Username <- NULL
+
+    ## Prepare data set and preformatiing
+    data <- lapply(username, function(usr) {
+        mylst <- user_performance(usr)
+        mylst$Username <- usr
+
+        return(mylst)
+    })
+
+    user_data <- lapply(data, function(x) {
+        x$User_Performance %>%
+            mutate_if(is.factor, as.character) %>%
+            mutate_at(vars(Reputation:Average_Daily_Correlation), as.numeric) %>%
+            mutate(Username = x$Username)
+    }) %>%
+        bind_rows() %>%
+        mutate(Date = as_date(ymd_hms(Date)))
+
+    submission_data <- lapply(data, function(x) {
+        x$Submission_Performance %>%
+            mutate_if(is.factor, as.character) %>%
+            mutate_at(vars(Round_Correlation:Correlation_With_MM), as.numeric) %>%
+            mutate(Username = x$Username)
+    }) %>%
+        bind_rows() %>%
+        mutate(Date = as_date(ymd_hms(Date)))
+
+    if (round_aggregate) {
+        submission_data <- submission_data %>%
+            group_by(Round_Number, Username) %>%
+            summarise(Date = max(Date),
+                      Round_Correlation = mean(Round_Correlation, na.rm = TRUE),
+                      MMC = mean(MMC, na.rm = TRUE),
+                      Correlation_With_MM = mean(Correlation_With_MM, na.rm = TRUE)) %>%
+            ungroup()
+    }
+
+    if (!is.null(dates)) {
+        user_data <- user_data %>%
+            filter(Date %in% dates)
+        submission_data <- submission_data %>%
+            filter(Date %in% dates)
+    }
+
+    return(list(user_data = user_data, submission_data = submission_data))
+}
+
+#' Get the valid dataset for a particular metric
+#'
+#' @name get_valid_data
+#'
+#' @param username A vector of one or more usernames
+#' @param metric Based on the metric selected, get the correct data
+#' @param merge If TRUE, merge the results into a single username
+#' @param round_aggregate If TRUE, aggregate the submission data by round
+#'
+#' @import dplyr
+#'
+get_valid_data <- function(username, metric, merge = FALSE, round_aggregate = TRUE) {
+    Date <- NMR_Staked <- Leaderboard_Bonus <- Payout_NMR <- NULL
+    Reputation <- Rank <- Average_Daily_Correlation <- Round_Correlation <- MMC <- Correlation_With_MM <- NULL
+
+    user_metrics <- c("Reputation", "Rank", "NMR_Staked", "Leaderboard_Bonus",
+                      "Payout_NMR", "Average_Daily_Correlation")
+    sub_metrics <- c("Round_Correlation", "MMC", "Correlation_With_MM")
+
+    if (!(metric %in% c(user_metrics, sub_metrics))) {
+        stop(paste0("Metric not found. Valid metrics are: ", paste(c(user_metrics, sub_metrics), collapse = ", ")))
+    }
+
+    all_data <- user_performance_data(username, round_aggregate = round_aggregate)
+
+    if (metric %in% user_metrics) {
+        time_data <- all_data$user_data
+
+        if (merge) {
+            time_data <- time_data %>%
+                group_by(Date) %>%
+                summarise(
+                    NMR_Staked = sum(NMR_Staked),
+                    Leaderboard_Bonus = sum(Leaderboard_Bonus),
+                    Payout_NMR = sum(Payout_NMR),
+                    Reputation = mean(Reputation),
+                    Rank = mean(Rank),
+                    Average_Daily_Correlation = mean(Average_Daily_Correlation),
+                    Username = "multiple"
+                )
+        }
+    } else {
+        time_data <- all_data$submission_data
+
+        if (merge) {
+            time_data <- time_data %>%
+                group_by(Date) %>%
+                summarise(
+                    Round_Correlation = mean(Round_Correlation),
+                    MMC = mean(MMC),
+                    Correlation_With_MM = mean(Correlation_With_MM),
+                    Username = "multiple"
+                )
+        }
+    }
+
+    return(time_data)
+}
+
+#' Get the performance of the user over time
+#'
+#' @name performance_over_time
+#'
+#' @param username A vector of one or more usernames
+#' @param metric A statistic, as a character vector.
+#' @param merge If TRUE, combine the usernames into a single result
+#' @param outlier_cutoff The absolute value above which points will be displayed
+#' @param round_aggregate If TRUE, aggregate the submission data by round
+#'
+#' @export
+#'
+#' @import ggplot2
+#' @import dplyr
+#' @importFrom lubridate as_date
+#'
+performance_over_time <- function(username, metric, merge = FALSE, outlier_cutoff = if (round_aggregate) 0 else 0.0125, round_aggregate = TRUE)
+{
+    Relevant <- `.` <- NULL
+
+    time_data <- get_valid_data(username, metric, merge = merge, round_aggregate = round_aggregate) %>%
+        mutate(Relevant = .[[metric]])
+
+    outlier_data <- time_data %>%
+        filter(abs(Relevant) >= outlier_cutoff)
+
+    myx <- "Date"
+    if (round_aggregate && "Round_Number" %in% names(time_data)) myx <- "Round_Number"
+
+    p1 <- ggplot(data = time_data, aes_string(x = myx, y = metric, colour = "Username")) +
+        geom_smooth() +
+        geom_point(data = outlier_data, size = 2) +
+        ylab(tools::toTitleCase(gsub("_", " ", metric))) +
+        xlab(tools::toTitleCase(gsub("_", " ", myx))) +
+        theme_bw()
+
+    if (!round_aggregate) {
+        p1 <- p1 + scale_x_date(date_breaks = "1 months", date_labels = "%b %y")
+    }
+
+    return(p1)
+}
+
+#' Get the performance of the user as a distribution
+#'
+#' @name performance_distribution
+#'
+#' @param username A vector of one or more usernames
+#' @param metric A statistic, as a character vector.
+#' @param merge If TRUE, combine the usernames into a single result
+#' @param round_aggregate If TRUE, aggregate the submission data by round
+#'
+#' @export
+#'
+#' @import ggplot2
+#' @import dplyr
+#'
+performance_distribution <- function(username, metric, merge = FALSE, round_aggregate = TRUE)
+{
+    Username <- Relevant <- `.` <- Label <- NULL
+
+    hist_data <- get_valid_data(username, metric, merge = merge, round_aggregate = round_aggregate) %>%
+        mutate(Relevant = .[[metric]])
+
+    hist_avg <- hist_data %>%
+        group_by(Username) %>%
+        summarise(Relevant = mean(Relevant, na.rm = TRUE)) %>%
+        mutate(Label = paste0("Avg: ", round(Relevant, digits = 4)))
+
+    step_size <- function(metric) {
+        if (metric %in% c("Average_Daily_Correlation", "Round_Correlation")) {
+            function(y) seq(floor(min(y, na.rm = TRUE)), ceiling(max(y, na.rm = TRUE)), by = .01)
+        } else if (metric == "Reputation") {
+            function(y) seq(floor(min(y, na.rm = TRUE)), ceiling(max(y, na.rm = TRUE)), by = .1)
+        } else {
+            waiver()
+        }
+    }
+
+    ggplot(data = hist_data, aes_string(x = metric, fill = "Username")) +
+        geom_histogram(colour = "grey60") +
+        geom_vline(data = hist_avg, aes(xintercept = Relevant), linetype = "dashed") +
+        geom_label(data = hist_avg, vjust = 1.1, hjust = -0.1, aes(x = -Inf, y = Inf, label = Label), show.legend = FALSE) +
+        scale_x_continuous(breaks = step_size(metric)) +
+        xlab(tools::toTitleCase(gsub("_", " ", metric))) +
+        ylab("Number of Models") +
+        theme_bw() +
+        theme(legend.position = "off") +
+        facet_wrap(~Username, nrow=length(username))
+}
+
+#' Get the summary statistics for
+#'
+#' @name summary_statistics
+#'
+#' @param username A vector of one or more usernames
+#' @param dates A vector of one or more dates to consider. If NULL, use all data
+#' @param round_aggregate If TRUE, aggregate the submission data by round
+#'
+#' @export
+#'
+#' @import ggplot2
+#' @import dplyr
+#' @importFrom purrr map
+#' @importFrom stats cor
+#' @importFrom tidyr gather
+#' @importFrom tidyr spread
+#' @importFrom utils tail
+#'
+summary_statistics <- function(username, dates = NULL, round_aggregate = TRUE) {
+    Date <- Variable <- Value <- Username <- NMR_Staked <- Payout_NMR <- NULL
+    Leaderboard_Bonus <- `.` <- Round_Correlation <- Average_Daily_Correlation <- Correlation_With_MM <- MMC <- NULL
+
+    all_data <- user_performance_data(username, dates = dates, round_aggregate = round_aggregate)
+
+    summary_stat_user <- all_data$user_data %>%
+        group_by(Username) %>%
+        arrange(Date) %>%
+        summarise(`Current Amount Staked` = tail(NMR_Staked, 1),
+                  `Total Net Payout` = sum(Payout_NMR, na.rm = TRUE),
+                  `Average Payout` = mean(Payout_NMR, na.rm = TRUE),
+                  `Total Bonus` = sum(Leaderboard_Bonus, na.rm = TRUE),
+                  `Average Daily Correlation` = mean(Average_Daily_Correlation, na.rm = TRUE))
+
+    summary_stat_sub <- all_data$submission_data %>%
+        group_by(Username) %>%
+        summarise(`Average Round Correlation` = mean(Round_Correlation, na.rm = TRUE),
+                  `Average MMC` = mean(MMC, na.rm = TRUE),
+                  `Average Correlation With MM` = mean(Correlation_With_MM, na.rm = TRUE))
+
+    summary_stat <- summary_stat_user %>%
+        left_join(summary_stat_sub)
+
+    if (length(username) == 1) return(summary_stat)
+
+    cc_stat <- all_data$user_data %>%
+        select(Date, Username, Average_Daily_Correlation) %>%
+        gather(key = Variable, value = Value, 3:ncol(.)) %>%
+        spread(key = Username, value = Value) %>%
+        split(.$Variable) %>%
+        map(.f = function(x) cor(x[,-(1:2)], use = "pairwise.complete.obs"))
+
+    return(list(stats = summary_stat,
+                corrs = cc_stat))
+
+}
