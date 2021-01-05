@@ -6,19 +6,19 @@
 \usage{
 submit_predictions(
   submission,
-  model_id = NULL,
   location = tempdir(),
-  tournament = "Kazutsugi"
+  tournament = "Nomi",
+  model_id = NULL
 )
 }
 \arguments{
-\item{submission}{The data frame of predictions to submit. This should have two columns named "id" & "prediction_kazutsugi"}
-
-\item{model_id}{Target model UUID (required for accounts with multiple models)}
+\item{submission}{The data frame of predictions to submit. This should have two columns named "id" & "prediction"}
 
 \item{location}{The location in which to store the predictions}
 
-\item{tournament}{The name of the tournament, Default is Kazutsugi and is not case-sensitive}
+\item{tournament}{The name of the tournament, Default is Nomi and is not case-sensitive}
+
+\item{model_id}{Target model UUID (required for accounts with multiple models)}
 }
 \value{
 The submission id for the submission made
@@ -28,6 +28,6 @@ Function to submit the Numerai Tournament predictions
 }
 \examples{
 \dontrun{
-submission_id <- submit_predictions(submission_data,tournament="Kazutsugi")
+submission_id <- submit_predictions(submission_data,tournament="Nomi")
 }
 }

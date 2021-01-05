@@ -187,7 +187,7 @@ run_query <- function(query, id = get_public_id(), key = get_api_key())
 #'
 #' @name download_data
 #' @param location The directory path in which to store the data
-#' @param tournament The name of the tournament, Default is KAZUTSUGI and is not case-sensitive. Since at the moment the datasets are same for all tournaments this parameter can be left blank.
+#' @param tournament The name of the tournament, Default is Nomi and is not case-sensitive. Since at the moment the datasets are same for all tournaments this parameter can be left blank.
 #' @return A list containing the training and tournament data objects
 #' @export
 #' @importFrom lubridate today
@@ -201,14 +201,14 @@ run_query <- function(query, id = get_public_id(), key = get_api_key())
 #' data_dir <- tempdir()
 #'
 #' ## Download data set for current competition
-#' data <- download_data(data_dir,tournament="KAZUTSUGI")
+#' data <- download_data(data_dir,tournament="Nomi")
 #' data_train <- data$data_train
 #' data_tournament <- data$data_tournament
 #' }
-download_data <- function(location = tempdir(),tournament="KAZUTSUGI")
+download_data <- function(location = tempdir(),tournament="NOMI")
 {
 	## Match tournament ID
-	tournament_id <- match(tolower(tournament),tolower(c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","KAZUTSUGI")))
+	tournament_id <- match(tolower(tournament),tolower(c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","NOMI")))
 	if(is.na(tournament_id)) stop("Tournament Name doesn't match")
 
 	## Get download link
@@ -235,10 +235,10 @@ download_data <- function(location = tempdir(),tournament="KAZUTSUGI")
 #' Function to submit the Numerai Tournament predictions
 #'
 #' @name submit_predictions
-#' @param submission The data frame of predictions to submit. This should have two columns named "id" & "prediction_kazutsugi"
-#' @param model_id Target model UUID (required for accounts with multiple models)
+#' @param submission The data frame of predictions to submit. This should have two columns named "id" & "prediction"
 #' @param location The location in which to store the predictions
-#' @param tournament The name of the tournament, Default is Kazutsugi and is not case-sensitive
+#' @param tournament The name of the tournament, Default is Nomi and is not case-sensitive
+#' @param model_id Target model UUID (required for accounts with multiple models)
 #' @return The submission id for the submission made
 #' @export
 #' @importFrom lubridate today
@@ -246,23 +246,29 @@ download_data <- function(location = tempdir(),tournament="KAZUTSUGI")
 #' @importFrom utils write.csv
 #' @examples
 #' \dontrun{
-#' submission_id <- submit_predictions(submission_data,tournament="Kazutsugi")
+#' submission_id <- submit_predictions(submission_data,tournament="Nomi")
 #' }
-submit_predictions <- function(submission, model_id = NULL, location = tempdir(),tournament="Kazutsugi")
+submit_predictions <- function(submission, location = tempdir(),tournament="Nomi", model_id = NULL)
 {
 	## Match tournament ID
-	tournament_id <- match(tolower(tournament),tolower(c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","KAZUTSUGI")))
+	tournament_id <- match(tolower(tournament),tolower(c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","NOMI")))
 	if(is.na(tournament_id)) stop("Tournament Name doesn't match")
-	if(!all(names(submission)==c("id","prediction_kazutsugi"))) stop("Column names should be id & prediction_kazutsugi")
+	if(!all(names(submission)==c("id","prediction"))) stop("Column names should be id & prediction")
 	#names(submission)[2] <- paste0(names(submission)[2],"_",tolower(tournament))
 
 	## Write out the file
 	submission_filename <- file.path(location, paste0("submission_data_", today(), ".csv"))
 	write.csv(submission, submission_filename, row.names = FALSE)
 
+	if (is.null(model_id)) {
+	    model_id <- get_models()[account_info()$username]
+	}
+
 	## Get a slot on AWS for our submission
 	aws_slot_query <- paste0('query aws_slot_query {
-							submissionUploadAuth (filename : "submission_data.csv",tournament:',tournament_id,'){
+							submissionUploadAuth (filename : "submission_data.csv",
+							                      tournament:',tournament_id,',
+							                      modelId:"',model_id,'"){
 								filename,
 								url
 							}
@@ -278,7 +284,9 @@ submit_predictions <- function(submission, model_id = NULL, location = tempdir()
 	## Register our submission and get evaluation for it
 	register_submission_query <- paste0(
 											'mutation register_submission_query {
-												createSubmission (filename : "',query_pass$data$submissionUploadAuth$filename,'",tournament:',tournament_id,'",modelId:',model_id,'){id}
+												createSubmission (filename : "',query_pass$data$submissionUploadAuth$filename,'",
+												tournament:',tournament_id,',
+												modelId:"',model_id,'"){id}
 											}'
 										)
 	query_pass <- run_query(query=register_submission_query)
@@ -472,17 +480,17 @@ account_info <- function()
 #' Get current round and it's closing time
 #'
 #' @name current_round
-#' @param tournament The name of the tournament, Default is Kazutsugi and is not case-sensitive
+#' @param tournament The name of the tournament, Default is Nomi and is not case-sensitive
 #' @return Returns the current round number and it's closing times
 #' @export
 #' @examples
 #' \dontrun{
 #' current_round()
 #' }
-current_round <- function(tournament="Kazutsugi")
+current_round <- function(tournament="Nomi")
 {
 	## Match tournament ID
-	tournament_id <- match(tolower(tournament),tolower(c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","KAZUTSUGI")))
+	tournament_id <- match(tolower(tournament),tolower(c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","NOMI")))
 	if(is.na(tournament_id)) stop("Tournament Name doesn't match")
 
 	current_round = paste0('query current_round {
@@ -559,17 +567,17 @@ release_nmr <- function(value, model_id = NULL, mfa_code = "", password = "")
 #'
 #' @name round_stats
 #' @param round_number Round Number for which information to fetch
-#' @param tournament The name of the tournament, Default is Kazutsugi and is not case-sensitive
+#' @param tournament The name of the tournament, Default is Nomi and is not case-sensitive
 #' @return List containing general round information
 #' @export
 #' @examples
 #' \dontrun{
 #' round_stats(round_number=177)
 #' }
-round_stats <- function(round_number,tournament="Kazutsugi")
+round_stats <- function(round_number,tournament="Nomi")
 {
 	## Match tournament ID
-	tournament_id <- match(tolower(tournament),tolower(c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","KAZUTSUGI")))
+	tournament_id <- match(tolower(tournament),tolower(c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","NOMI")))
 	if(is.na(tournament_id)) stop("Tournament Name doesn't match")
 
 	round_stats_query <- paste0(
@@ -589,7 +597,7 @@ round_stats <- function(round_number,tournament="Kazutsugi")
 	round_data <- query_pass$data$rounds[[1]]
 	result_info <- data.frame(
 								Round_Number = round_data$number,
-								Tournament_Name = c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","KAZUTSUGI")[round_data$tournament],
+								Tournament_Name = c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","KAZUTSUGI","NOMI")[round_data$tournament],
 								Open_Time = round_data$openTime,
 								Close_Time = round_data$closeTime,
 								Close_Staking_Time = ifelse(is.null(round_data$closeStakingTime),NA,round_data$closeStakingTime),
@@ -680,10 +688,10 @@ user_performance <- function(user_name="theomniacs")
 	query_pass <- run_query(query=user_query)
 
 	user_performance <- data.frame(
-								Date = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,"[[","date"),
-								Tier = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,"[[","tier"),
-								Reputation = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,"[[","reputation"),
-								Rank = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,"[[","rank"),
+	                            Date = sapply(query_pass$data$v2UserProfile$dailyUserPerformances, function(x) ifelse(is.null(x[["date"]]), NA, x[["date"]]) ),
+	                            Tier = sapply(query_pass$data$v2UserProfile$dailyUserPerformances, function(x) ifelse(is.null(x[["tier"]]), NA, x[["tier"]]) ),
+	                            Reputation = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,  function(x) ifelse(is.null(x[["reputation"]]), NA, x[["reputation"]]) ),
+	                            Rank = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,  function(x) ifelse(is.null(x[["rank"]]), NA, x[["rank"]]) ),
 								NMR_Staked = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,function(x) ifelse(is.null(x[["stakeValue"]]),NA,x[["stakeValue"]])),
 								Leaderboard_Bonus = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,function(x) ifelse(is.null(x[["leaderboardBonus"]]),NA,x[["leaderboardBonus"]])),
 								Payout_NMR = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,function(x) ifelse(is.null(x[["averageCorrelationPayout"]]),NA,x[["averageCorrelationPayout"]])),
@@ -691,7 +699,7 @@ user_performance <- function(user_name="theomniacs")
   							)
 	submission_performance <- data.frame(
 								Round_Number = sapply(query_pass$data$v2UserProfile$dailySubmissionPerformances,"[[","roundNumber"),
-								Date = sapply(query_pass$data$v2UserProfile$dailySubmissionPerformances,"[[","date"),
+								Date = sapply(query_pass$data$v2UserProfile$dailySubmissionPerformances, function(x) ifelse(is.null(x[["date"]]), NA, x[["date"]])),
 								Round_Correlation = sapply(query_pass$data$v2UserProfile$dailySubmissionPerformances,function(x) ifelse(is.null(x[["correlation"]]),NA,x[["correlation"]])),
 								MMC = sapply(query_pass$data$v2UserProfile$dailySubmissionPerformances,function(x) ifelse(is.null(x[["mmc"]]),NA,x[["mmc"]])),
 								Correlation_With_MM = sapply(query_pass$data$v2UserProfile$dailySubmissionPerformances,function(x) ifelse(is.null(x[["correlationWithMetamodel"]]),NA,x[["correlationWithMetamodel"]]))
