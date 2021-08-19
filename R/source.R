@@ -239,6 +239,7 @@ download_data <- function(location = tempdir(),tournament="NOMI")
 #' @param location The location in which to store the predictions
 #' @param tournament The name of the tournament, Default is Nomi and is not case-sensitive
 #' @param model_id Target model UUID (required for accounts with multiple models)
+#' @param prefix The prefix to use for the submission csv file
 #' @return The submission id for the submission made
 #' @export
 #' @importFrom lubridate today
@@ -248,55 +249,94 @@ download_data <- function(location = tempdir(),tournament="NOMI")
 #' \dontrun{
 #' submission_id <- submit_predictions(submission_data,tournament="Nomi")
 #' }
-submit_predictions <- function(submission, location = tempdir(),tournament="Nomi", model_id = NULL)
+submit_predictions <- function(submission, location = tempdir(), tournament = "Nomi", model_id = NULL, prefix = tournament)
 {
-	## Match tournament ID
-	tournament_id <- match(tolower(tournament),tolower(c("BERNIE","","","KEN","CHARLES","FRANK","HILLARY","NOMI")))
-	if(is.na(tournament_id)) stop("Tournament Name doesn't match")
-	if(!all(names(submission)==c("id","prediction"))) stop("Column names should be id & prediction")
-	#names(submission)[2] <- paste0(names(submission)[2],"_",tolower(tournament))
 
-	## Write out the file
-	submission_filename <- file.path(location, paste0("submission_data_", today(), ".csv"))
-	write.csv(submission, submission_filename, row.names = FALSE)
+    if(is.null(model_id)) stop("Must provide a model_id")
 
-	if (is.null(model_id)) {
-	    model_id <- get_models()[account_info()$username]
-	}
+    ## Read the Trigger ID env variable
+    trigger_id = Sys.getenv("TRIGGER_ID")
+    if (trigger_id == "") {
+        trigger_id = NULL
+    }
 
-	## Get a slot on AWS for our submission
-	aws_slot_query <- paste0('query aws_slot_query {
-							submissionUploadAuth (filename : "submission_data.csv",
-							                      tournament:',tournament_id,',
+    ## Match tournament ID
+    tournament_id <- match(tolower(tournament),tolower(c("NOMI","SIGNALS"))) + 7
+    if(is.na(tournament_id)) stop("Tournament Name doesn't match")
+
+    if(tournament_id == 8 && !all(names(submission)==c("id","prediction"))) stop("Column names should be id & prediction")
+
+    ## Write out the file
+    date <- gsub("-","_",Sys.Date())
+    submission_filename <- file.path(location, paste0(prefix, "_submission_", date, ".csv"))
+    write.csv(submission, submission_filename, row.names = FALSE)
+
+    ## Get a slot on AWS for our submission
+    if(tournament_id == 8){
+        aws_slot_query <- paste0('query aws_slot_query {
+							submissionUploadAuth (filename : "',paste0(prefix, "_submission_", date, ".csv"),'",
+							                      tournament: ',tournament_id,',
 							                      modelId:"',model_id,'"){
 								filename,
 								url
 							}
 						}')
-	query_pass <- run_query(query=aws_slot_query)
+    } else {
+        aws_slot_query <- paste0('query aws_slot_query {
+							submissionUploadSignalsAuth (filename : "',paste0(prefix, "_submission_", date, ".csv"),'",
+							                      modelId:"',model_id,'"){
+								filename,
+								url
+							}
+						}')
+    }
 
-	## Upload the predictions
-	mysubmission <- PUT(
-							url = query_pass$data$submissionUploadAuth$url,
-							body = upload_file(path = submission_filename)
-						)
+    query_pass <- run_query(query=aws_slot_query)
 
-	## Register our submission and get evaluation for it
-	register_submission_query <- paste0(
-											'mutation register_submission_query {
-												createSubmission (filename : "',query_pass$data$submissionUploadAuth$filename,'",
-												tournament:',tournament_id,',
-												modelId:"',model_id,'"){id}
-											}'
-										)
-	query_pass <- run_query(query=register_submission_query)
+    if(tournament_id == 8) numerai_aws_url = query_pass$data$submissionUploadAuth$url else numerai_aws_url = query_pass$data$submissionUploadSignalsAuth$url
 
-	## If error
-	if(!is.null(query_pass$errors[[1]]$message)) stop(query_pass$errors[[1]]$message)
 
-	## Return submission id
-	message(paste("Submitted Prediction with id",query_pass$data$createSubmission$id))
-	return(query_pass$data$createSubmission$id)
+    ## Upload the predictions
+    mysubmission <- httr::PUT(
+        url = numerai_aws_url,
+        body = upload_file(path = submission_filename)
+    )
+
+    if (mysubmission$status_code != 200) {
+        stop(paste0("Uploading submission failed with status code ", mysubmission$status_code))
+    }
+
+    ## Register our submission and get evaluation for it
+    if(tournament_id == 8){
+        register_submission_query <- paste0(
+            'mutation register_submission_query {
+					      							createSubmission (filename : "',query_pass$data$submissionUploadAuth$filename,'",
+					      							tournament: ',tournament_id,',
+					      							triggerId: "',trigger_id,'",
+					      							modelId:"',model_id,'"){id}
+					      						}'
+        )
+    } else {
+        register_submission_query <- paste0(
+            'mutation register_submission_query {
+					      							createSignalsSubmission (filename : "',query_pass$data$submissionUploadSignalsAuth$filename,'",
+					      							triggerId: "',trigger_id,'",
+					      							modelId:"',model_id,'"){id}
+					      						}'
+        )
+    }
+
+    query_pass <- run_query(query=register_submission_query)
+
+    if(tournament_id == 8) query_id <- query_pass$data$createSubmission$id else query_id <- query_pass$data$createSignalsSubmission$id
+
+    ## If error
+    if(!is.null(query_pass$errors[[1]]$message)) stop(query_pass$errors[[1]]$message)
+
+
+    ## Return submission id
+    message(paste("Submitted Prediction with id", query_id))
+    return(query_id)
 }
 
 
@@ -321,22 +361,11 @@ status_submission_by_id <- function(sub_id)
 										round{
 											number
 										},
-										selected,
-										consistency,
-										concordance {
-											pending
-											value
-										}
+										selected
 									}
 								}'
 							)
 	query_pass <- run_query(query=sub_stat_query)
-
-	## If not evaluated yet
-	if(is.null(query_pass$data$submissions[[1]]$concordance))
-	{
-		return("Not Scored Yet")
-	}
 
 	## If evaluated submission
 	result <- list(
@@ -344,8 +373,6 @@ status_submission_by_id <- function(sub_id)
 					Round_Number = query_pass$data$submissions[[1]]$round$number,
 					Filename = query_pass$data$submissions[[1]]$filename,
 					Selected = query_pass$data$submissions[[1]]$selected,
-					Consistency = query_pass$data$submissions[[1]]$consistency,
-					Concordance = ifelse(!query_pass$data$submissions[[1]]$concordance$pending,query_pass$data$submissions[[1]]$concordance$value,"Pending"),
 					Validation_Correlation = query_pass$data$submissions[[1]]$validationCorrelation,
 					Live_Correlation = query_pass$data$submissions[[1]]$liveCorrelation
 					)
@@ -661,41 +688,37 @@ user_performance <- function(user_name="theomniacs")
 {
 	user_query <- paste0(
 									'query user_query {
-									v2UserProfile(username:"',tolower(user_name),'"){
-										dailyUserPerformances {
-											averageCorrelation
-      										averageCorrelationPayout
-      										date
-      										leaderboardBonus
-      										rank
-      										reputation
-      										stakeValue
-      										tier
-										}
-										dailySubmissionPerformances {
-											correlation
+						         v2UserProfile(username:"',tolower(user_name),'"){
+    										dailyUserPerformances {
+                          corrRep
+                          date
+                          fncRep
+                          mmcRep
+                          payoutPending
+                          payoutSettled
+                          rank
+                          stakeValue
+    										}
+    										dailySubmissionPerformances {
+    											correlation
       										date
       										roundNumber
       										mmc
       										correlationWithMetamodel
       									}
-      									historicalNetNmrEarnings
-      									historicalNetUsdEarnings
-      									netEarnings
       									totalStake
-									}}'
+									  }
+                  }'
 								)
 	query_pass <- run_query(query=user_query)
 
 	user_performance <- data.frame(
-	                            Date = sapply(query_pass$data$v2UserProfile$dailyUserPerformances, function(x) ifelse(is.null(x[["date"]]), NA, x[["date"]]) ),
-	                            Tier = sapply(query_pass$data$v2UserProfile$dailyUserPerformances, function(x) ifelse(is.null(x[["tier"]]), NA, x[["tier"]]) ),
-	                            Reputation = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,  function(x) ifelse(is.null(x[["reputation"]]), NA, x[["reputation"]]) ),
-	                            Rank = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,  function(x) ifelse(is.null(x[["rank"]]), NA, x[["rank"]]) ),
-								NMR_Staked = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,function(x) ifelse(is.null(x[["stakeValue"]]),NA,x[["stakeValue"]])),
-								Leaderboard_Bonus = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,function(x) ifelse(is.null(x[["leaderboardBonus"]]),NA,x[["leaderboardBonus"]])),
-								Payout_NMR = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,function(x) ifelse(is.null(x[["averageCorrelationPayout"]]),NA,x[["averageCorrelationPayout"]])),
-								Average_Daily_Correlation = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,function(x) ifelse(is.null(x[["averageCorrelation"]]),NA,x[["averageCorrelation"]]))
+	                            Date = sapply(query_pass$data$v2UserProfile$dailyUserPerformances, function(x) ifelse(is.null(x[["date"]]), NA, x[["date"]])),
+	                            CORRRep = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,  function(x) ifelse(is.null(x[["corrRep"]]), NA, x[["corrRep"]])),
+	                            MMCRep = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,  function(x) ifelse(is.null(x[["mmcRep"]]), NA, x[["mmcRep"]])),
+	                            FNCRep = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,  function(x) ifelse(is.null(x[["fncRep"]]), NA, x[["fncRep"]])),
+	                            Rank = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,  function(x) ifelse(is.null(x[["rank"]]), NA, x[["rank"]])),
+								NMR_Staked = sapply(query_pass$data$v2UserProfile$dailyUserPerformances,function(x) ifelse(is.null(x[["stakeValue"]]),NA,x[["stakeValue"]]))
   							)
 	submission_performance <- data.frame(
 								Round_Number = sapply(query_pass$data$v2UserProfile$dailySubmissionPerformances,"[[","roundNumber"),
@@ -742,7 +765,6 @@ user_performance_data <- function(username, dates = NULL, round_aggregate = TRUE
     user_data <- lapply(data, function(x) {
         x$User_Performance %>%
             mutate_if(is.factor, as.character) %>%
-            mutate_at(vars(Reputation:Average_Daily_Correlation), as.numeric) %>%
             mutate(Username = x$Username)
     }) %>%
         bind_rows() %>%

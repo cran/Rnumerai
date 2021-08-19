@@ -1,6 +1,6 @@
-cda5884eeb363a2b87deddc342cbe22c *DESCRIPTION
+f680a590e6f536ae110d15f1480772c6 *DESCRIPTION
 80599ca5616493b992b30018198c352b *NAMESPACE
-fa6469bdc0f66be5bdf6d05f30fdb80e *R/source.R
+ef51a02fb815c329fc3f26deb5d1f8fd *R/source.R
 e7ed5caceee0f45b09492d7336a8c349 *README.md
 e165212d6c3f34e20bf10aa43254d344 *man/account_info.Rd
 3e6fa47bfb13e327174736b101421ce8 *man/current_round.Rd
@@ -22,7 +22,7 @@ f137570f3fd656068c794b58febb4778 *man/set_api_key.Rd
 230cc27234ed42e0420ca67ea5ca076f *man/set_public_id.Rd
 1f8a10e2a7a09aedfe3a9c7394e844db *man/stake_nmr.Rd
 149f7c3a3c15f82ff3092b3063190bbf *man/status_submission_by_id.Rd
-cbf5dbde1f201905364fd6d8598e1010 *man/submit_predictions.Rd
+9a1e32b49ec70307176dc85e851cc944 *man/submit_predictions.Rd
 33b0523cef7e12aab866c32f1949cc8d *man/summary_statistics.Rd
 ff3c6e8881f23a314c3af0e3bcd3e467 *man/user_info.Rd
 4b8ba26cce05ad0522c607968dd54a48 *man/user_performance.Rd
