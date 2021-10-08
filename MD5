@@ -1,10 +1,10 @@
-34be88527f42d4ceb5933f04cd89f5bd *DESCRIPTION
-80599ca5616493b992b30018198c352b *NAMESPACE
-270b027f625d4d2cee8c64604b74e691 *R/source.R
-e7ed5caceee0f45b09492d7336a8c349 *README.md
+2dbf37e761c48c5f99b6ece40202a937 *DESCRIPTION
+b9a063fa176e0bf26a557333b09a3f32 *NAMESPACE
+0a7ceb33269e7efc9acf0523307422a5 *R/source.R
+8fe1ccd5d0f21186699879bc497f868d *README.md
 e165212d6c3f34e20bf10aa43254d344 *man/account_info.Rd
 3e6fa47bfb13e327174736b101421ce8 *man/current_round.Rd
-e2637ed98422935d7e23e32246d12634 *man/download_data.Rd
+11f6bdb71cd7e02f4d6299a1cf16acdb *man/download_data.Rd
 33a3bd51a651971f5e6b49e95a81c395 *man/figures/OAG_CLR_web_small.png
 d010dbfe1249aee0d8c065a7fb886a59 *man/get_api_key.Rd
 03220e44919f8189f32f3c8449cb30a5 *man/get_models.Rd
@@ -22,7 +22,7 @@ f137570f3fd656068c794b58febb4778 *man/set_api_key.Rd
 230cc27234ed42e0420ca67ea5ca076f *man/set_public_id.Rd
 1f8a10e2a7a09aedfe3a9c7394e844db *man/stake_nmr.Rd
 149f7c3a3c15f82ff3092b3063190bbf *man/status_submission_by_id.Rd
-9a1e32b49ec70307176dc85e851cc944 *man/submit_predictions.Rd
+53979720e1c349397582a7b5c390c6bf *man/submit_predictions.Rd
 33b0523cef7e12aab866c32f1949cc8d *man/summary_statistics.Rd
 ff3c6e8881f23a314c3af0e3bcd3e467 *man/user_info.Rd
 4b8ba26cce05ad0522c607968dd54a48 *man/user_performance.Rd
