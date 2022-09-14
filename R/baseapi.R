@@ -98,6 +98,29 @@ set_api_key <- function(key) {
   return(TRUE)
 }
 
+#' Run a custom query
+#' @param query Query to pass as a string
+#' @param auth Whether the query need authorisation to run
+#' @return Parsed result from custom query
+#'
+#' @export
+#'
+#' @importFrom jsonlite fromJSON
+#'
+#' @examples
+#' \dontrun{
+#' run_query(query = 'query{account{username }}', auth=TRUE)
+#' }
+run_query <- function(query,auth=TRUE) 
+{
+    qcon <- initialize_queries(auth=auth)
+    con <- qcon[[1]]
+    qry <- qcon[[2]]
+    qry$query('custom_query',query)
+
+    result <- fromJSON(con$exec(qry$queries$custom_query))$data
+    return(result)
+}
 
 #' Get all information about your account
 #' @return User information
@@ -419,6 +442,57 @@ round_model_performances <- function(username,tournament=8)
     result$payout <- as.numeric(result$payout)
     result$roundPayoutFactor <- as.numeric(result$roundPayoutFactor)
     result$selectedStakeValue <- as.numeric(result$selectedStakeValue)
+    return(result)
+}
+
+#' Fetch Daily performance of any user
+#' @param username User Name
+#' @param tournament Tournament ID, 8 for Main, 11 for Signal
+#' @return list of round model performance entries
+#'
+#' @export
+#'
+#' @importFrom jsonlite fromJSON
+#' @import lubridate
+#'
+#' @examples
+#' \dontrun{
+#' daily_model_performances(username = "bayo")
+#' }
+daily_model_performances <- function(username,tournament=8) 
+{
+    qcon <- initialize_queries(auth=FALSE)
+    con <- qcon[[1]]
+    qry <- qcon[[2]]
+    if(tournament==8) result <- fromJSON(con$exec(qry$queries$daily_model_performances_main,list(username = username)))$data$v3UserProfile$dailyModelPerformances
+    if(tournament==11) result <- fromJSON(con$exec(qry$queries$daily_model_performances_signal,list(username = username)))$data$v2SignalsProfile$dailyModelPerformances
+    result$date <- as_datetime(result$date)
+    return(result)
+}
+
+
+#' Fetch Daily Submission Performance of any user
+#' @param username User Name
+#' @param tournament Tournament ID, 8 for Main, 11 for Signal
+#' @return list of round model performance entries
+#'
+#' @export
+#'
+#' @importFrom jsonlite fromJSON
+#' @import lubridate
+#'
+#' @examples
+#' \dontrun{
+#' daily_submission_performances(username = "bayo")
+#' }
+daily_submission_performances <- function(username,tournament=8) 
+{
+    qcon <- initialize_queries(auth=FALSE)
+    con <- qcon[[1]]
+    qry <- qcon[[2]]
+    if(tournament==8) result <- fromJSON(con$exec(qry$queries$daily_submission_performances_main,list(username = username)))$data$v2UserProfile$dailySubmissionPerformances
+    if(tournament==11) result <- fromJSON(con$exec(qry$queries$daily_submission_performances_signal,list(username = username)))$data$signalsUserProfile$dailySubmissionPerformances
+    result$date <- as_datetime(result$date)
     return(result)
 }
 
